@@ -44,13 +44,17 @@ from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from PIL import Image
 
-# image zero point is the top-left corner of the image
-# to drag something left means that the new content is on the right
-# https://realpython.com/image-processing-with-the-python-pillow-library/
+# - image zero point is the top-left corner of the image
+#   https://realpython.com/image-processing-with-the-python-pillow-library/
+# - to drag something left means that the new content is on the right,
+#   for up and down it's the same
 
 
 def setup_browser():
-    """Set up the Selenium WebDriver. Chromium seems better for this task."""
+    """
+    Set up the Selenium WebDriver.
+    Chromium seems better for this task.
+    """
     # return selenium_firefox()
     return selenium_chromium()
 
@@ -89,7 +93,6 @@ def create_directories():
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     base_dir = f"map_output_{timestamp}"
-    # base_dir = "map_output_20250118_235849"
     os.makedirs(base_dir, exist_ok=True)
     raw_dir = os.path.join(base_dir, "raw_screenshots")
     cropped_dir = os.path.join(base_dir, "cropped_images")
@@ -99,7 +102,25 @@ def create_directories():
 
 
 def take_screenshot(driver, filename):
-    """Take a screenshot and save it to the specified filename."""
+    """
+    Take a screenshot of the current browser window and save it to a file.
+
+    This function uses the Selenium WebDriver to capture a screenshot of the
+    current state of the browser window and saves it to the specified file.
+
+    Parameters:
+    driver (selenium.webdriver.remote.webdriver.WebDriver): The Selenium WebDriver
+        instance controlling the browser.
+    filename (str): The path and name of the file where the screenshot will be saved.
+        The file extension should typically be '.png'.
+
+    Returns:
+    None
+
+    Side effects:
+    - Saves a screenshot file to the specified location.
+    - Prints a confirmation message to the console.
+    """
     driver.save_screenshot(filename)
     print(f"Saved screenshot: {filename}")
 
@@ -127,8 +148,6 @@ def crop_image(filename, cropped_dir, black):
     """
     with Image.open(filename) as img:
         width, height = img.size
-
-        # Assuming arbitrary dark parts are 100 pixels from each edge
         cropped_img = img.crop((black["left"], black["top"], width - black["right"], height - black["bottom"]))
         cropped_filename = os.path.join(cropped_dir, os.path.basename(filename))
         cropped_img.save(cropped_filename)
@@ -166,7 +185,7 @@ def assemble_image_details(
     images = []
     positions = []
 
-    # Collect filenames and positions from the overlap directory
+    # Collect filenames and positions from the cropped directory
     print("Collect filenames and positions from the cropped directory")
     cropped_files = sorted(os.listdir(cropped_dir))
     print(f"Found {len(cropped_files)} images in the cropped directory.")
@@ -177,10 +196,8 @@ def assemble_image_details(
                 parts = filename.replace(".png", "").split("_")
                 x, y = int(parts[2]), int(parts[3])
                 position = (x, y)
-                # images.append(Image.open(filepath))
                 images.append(filepath)
                 positions.append(position)
-                # print(f"Found for assembly: {filename} at {position}")
             except ValueError:
                 print(f"Skipping invalid filename format during assembly: {filename}")
                 continue
@@ -189,18 +206,17 @@ def assemble_image_details(
         print("No valid images found for assembly. Exiting.")
         return
 
-    # assembled_image_size_x, assembled_image_size_y = 0, 0
-    # assembled_image_size_x += movement_pixels * (number_of_steps ** 2) + 16000  # the last constant is just a buffer, will see if we need it
-    # assembled_image_size_y += movement_pixels * (number_of_steps ** 2) + 16000  # the last constant is just a buffer, will see if we need it
+    # size of the big picture, needs still refinement
     width, height = cropped_image_size
     assembled_image_size_x = width + (movement_pixels * steps * 2)
     assembled_image_size_y = height + (movement_pixels * steps * 2)
 
-    # this is hypothetical, overlaps are calculated redudant this way
+    # this will hold all the images
     print(f"creating empty assembled image: {assembled_image_size_x}x{assembled_image_size_y} pixel png.")
     assembled_image = Image.new('RGBA', (assembled_image_size_x, assembled_image_size_y))
     print("assembly image size in memory in bytes: ", sys.getsizeof(assembled_image.tobytes()))
 
+    # the very middle point of the assembled image
     center_x = assembled_image_size_x // 2
     center_y = assembled_image_size_y // 2
     x_offset = center_x
@@ -214,34 +230,43 @@ def assemble_image_details(
         image = Image.open(img)
         width, height = image.size
         x, y = int(pos[0]), int(pos[1])
-        prev_offset_x = x_offset
-        prev_offset_y = y_offset
         x_offset = center_x - (x * movement_pixels) - (height // 2)
         y_offset = center_y - (y * movement_pixels) - (width // 2)
-        # print(f"prev offset: x:{prev_offset_x} y:{prev_offset_y}")
-        # print(f"curr offset: x:{x_offset} y:{y_offset}")
-        # print(f"difference:  x:{x_offset - prev_offset_x}, y:{y_offset - prev_offset_y}")
         assembled_image.paste(image, (x_offset, y_offset))
-        print(f"Image pozition: ({x},{y}) size {width}x{height}px pasted into assembled map.")
-        # partial results for debug:
-        i += 1
-        # output_filename = f"{output_base_filename}_#{i}__{x}_{y}.png"
-        # print(f"Start saving assembled map as file: {output_filename}")
-        # assembled_image.save(output_filename)
+        print(f"Image position: ({x},{y}) size {width}x{height}px pasted into assembled map.")
 
+    # save the result
     print("___________________________________________")
     width, height = assembled_image.size
     output_filename = f"{output_base_filename}_steps{steps}_zoom{zoom_level}_{width}x{height}px.png"
     assembled_image.save(output_filename)
     print(f"Assembled map saved as {output_filename}")
     file_stats = os.stat(output_filename)
-    print(f'File Size is {round(file_stats.st_size / (1024 * 1024), 2)} MegaBytes')
+    print(f'File size is {round(file_stats.st_size / (1024 * 1024), 2)} MegaBytes')
 
 
-def cleanup(driver,  raw_dir, cropped_dir):
+def cleanup(driver, raw_dir, cropped_dir):
+    """
+    Clean up resources and temporary files after the map capture process.
+
+    This function performs the following cleanup tasks:
+    1. Closes the Selenium WebDriver.
+    2. Removes all PNG files from the cropped images directory.
+    3. Removes all PNG files from the raw screenshots directory.
+    4. Attempts to remove the cropped and raw directories.
+
+    Parameters:
+    driver (selenium.webdriver.remote.webdriver.WebDriver): The Selenium WebDriver instance to be closed.
+    raw_dir (str): Path to the directory containing raw screenshots.
+    cropped_dir (str): Path to the directory containing cropped images.
+
+    Side effects:
+    - Closes the browser controlled by the WebDriver.
+    - Deletes files and attempts to remove directories.
+    - Prints status messages to the console.
+    """
     print("Cleaning up...")
     driver.quit()
-    os.listdir(cropped_dir)
     for filename in os.listdir(cropped_dir):
         if filename.endswith(".png"):
             os.remove(os.path.join(cropped_dir, filename))
@@ -252,7 +277,7 @@ def cleanup(driver,  raw_dir, cropped_dir):
         os.rmdir(cropped_dir)
         os.rmdir(raw_dir)
     except OSError as e:
-         print(f"Failed to remove sub directories: {repr(e)}")
+         print(f"Failed to remove sub directories {cropped_dir} and/or {raw_dir} since {repr(e)}")
     print("Process completed.")
 
 
@@ -282,8 +307,7 @@ def open_browser(zoom_level=17):
     WebDriver: A Selenium WebDriver instance with the map loaded and ready for interaction.
 
     Note:
-    The function assumes that the setup_browser() function is defined elsewhere
-    and returns a configured WebDriver instance.
+    The setup_browser() function is defined elsewhere and returns a configured WebDriver instance.
     """
     print("Setting up browser...")
     driver = setup_browser()
@@ -313,6 +337,7 @@ def wait(seconds):
         print(".", end="", flush=True)
         time.sleep(1)
     print()
+
 
 def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, scroll_wait_seconds=6):
     """
@@ -379,16 +404,17 @@ def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, scroll
                 end_x = max(0, min(viewport_width, end_x))
                 end_y = max(0, min(viewport_height, end_y))
 
+                # Prepare where to go
                 move_mouse_x = end_x - center_x
                 move_mouse_y = end_y - center_y
                 print(f"Calculating next image --------------------------------------------------------------")
                 print(f"For next vales with ({dx}, {dy}) direction mouse move x: {move_mouse_x}, y: {move_mouse_y}, end_x: {end_x}, end_y: {end_y}")
 
-                # drag with mouse button held down
+                # Drag with mouse button held down
                 action.click_and_hold().perform()
                 action.move_by_offset(move_mouse_x, move_mouse_y).release().perform()
 
-                # set next iteration's values
+                # Set next iteration's values
                 x += dx
                 y += dy
                 i += 1
@@ -416,20 +442,24 @@ def main():
     """
     title = "Pest Megye"  # Title for the assembled map image
     movement_pixels = 800  # Adjust drag distance of mouse
-    steps = 30  # number of "circles" we walk around the map centre
+    steps = 15  # number of "circles" we walk around the map centre
     zoom_level = 15  # Adjust map zoom level upto 19
     scroll_wait_seconds = 6  # seconds, Wait for the map to load after each scroll
     base_dir, raw_dir, cropped_dir = create_directories()
     dark_top, dark_bottom = 110, 110
     dark_left, dark_right = 400, 400
     dark = {'top': dark_top, 'bottom': dark_bottom, 'left': dark_left, 'right': dark_right}
-    print(f"Movement is {movement_pixels}, steps are {steps}, zoom level is {zoom_level}.")
+    start_time = time.time()
+    print(f"Movement is {movement_pixels}px, steps are {steps}, zoom level is {zoom_level}.")
 
     # workflow starts here
     driver = open_browser(zoom_level=zoom_level)
     cropped_image_size = fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, scroll_wait_seconds)
     assemble_big_map(base_dir, cropped_dir, dark, movement_pixels, steps, zoom_level, cropped_image_size, title)
     cleanup(driver, raw_dir, cropped_dir)
+
+    # script running time
+    print(f"Total execution time was: {((time.time() - start_time) / 60):.2f} minutes.")
 
 if __name__ == "__main__":
     main()
