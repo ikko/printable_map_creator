@@ -1,0 +1,4 @@
+folium
+selenium
+pillow
+tqdm
