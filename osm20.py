@@ -46,8 +46,9 @@ from PIL import Image
 
 # - image zero point is the top-left corner of the image
 #   https://realpython.com/image-processing-with-the-python-pillow-library/
-# - to drag something left means that the new content is on the right,
-#   for up and down it's the same
+# - to drag something left means that the new content is on the right
+#   to drag it right results in content on the left
+#   for up and down & down and up it's the very same
 
 
 def setup_browser():
@@ -153,7 +154,7 @@ def take_screenshot(driver, filename):
     print(f"Saved screenshot: {filename}")
 
 
-def crop_image(filename, cropped_dir, black):
+def crop_image(filename, cropped_dir, dark):
     """
     Crop the darker UI elements from the screenshot and save the result.
 
@@ -163,7 +164,7 @@ def crop_image(filename, cropped_dir, black):
     Parameters:
     filename (str): The path to the image file to be cropped.
     cropped_dir (str): The directory where the cropped image will be saved.
-    black (dict): A dictionary containing the pixel values for cropping.
+    dark (dict): A dictionary containing the pixel values for cropping.
                   Expected keys are 'left', 'top', 'right', and 'bottom',
                   representing the number of pixels to crop from each edge.
 
@@ -176,7 +177,7 @@ def crop_image(filename, cropped_dir, black):
     """
     with Image.open(filename) as img:
         width, height = img.size
-        cropped_img = img.crop((black["left"], black["top"], width - black["right"], height - black["bottom"]))
+        cropped_img = img.crop((dark["left"], dark["top"], width - dark["right"], height - dark["bottom"]))
         cropped_filename = os.path.join(cropped_dir, os.path.basename(filename))
         cropped_img.save(cropped_filename)
         width, height = cropped_img.size
@@ -206,8 +207,27 @@ def wait(seconds):
 
 
 def move_mouse_to_center_of_viewport(action, driver):
+    """
+    Move the mouse cursor to the center of the browser viewport.
+
+    This function calculates the center coordinates of the viewport and moves
+    the mouse cursor to that position. It's typically used before performing
+    drag operations to ensure consistent starting positions.
+
+    Parameters:
+    action (ActionChains): The Selenium ActionChains object used for performing
+                           mouse actions.
+    driver (WebDriver): The Selenium WebDriver instance controlling the browser.
+
+    Returns:
+    tuple: A tuple containing four integers:
+        - center_x (int): The x-coordinate of the viewport's center.
+        - center_y (int): The y-coordinate of the viewport's center.
+        - viewport_height (int): The height of the viewport in pixels.
+        - viewport_width (int): The width of the viewport in pixels.
+    """
     viewport_height, viewport_width = retrieve_viewport_size(driver)
-    # Move mouse to the center of the viewport before dragging
+    # Move mouse to the center of the viewport usually before dragging
     center_x = viewport_width // 2
     center_y = viewport_height // 2
     move_mouse_to(action, center_x, center_y)
@@ -218,7 +238,30 @@ def move_mouse_to(action, center_x, center_y):
     action.w3c_actions.pointer_action.move_to_location(center_x, center_y)
 
 
-def pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds):
+def pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds, direction_text):
+    """
+    Pan the map using mouse actions within the browser viewport.
+
+    This function calculates the end position for a pan movement, performs the pan action
+    using Selenium's ActionChains, and waits for the map to load after panning.
+
+    Parameters:
+        action (ActionChains): Selenium ActionChains object for performing mouse actions.
+        center_x (int): X-coordinate of the center of the viewport.
+        center_y (int): Y-coordinate of the center of the viewport.
+        dx (int): Horizontal direction of movement (-1 for left, 1 for right, 0 for no horizontal movement).
+        dy (int): Vertical direction of movement (-1 for up, 1 for down, 0 for no vertical movement).
+        movement_pixels (int): Number of pixels to move in the specified direction.
+        viewport_height (int): Height of the browser viewport in pixels.
+        viewport_width (int): Width of the browser viewport in pixels.
+        pan_wait_seconds (int): Number of seconds to wait after panning for the map to load.
+        direction_text (str): Textual description of the panning direction for logging purposes.
+
+    Side effects:
+    - Prints debugging information about the panning action.
+    - Performs mouse actions in the browser to pan the map.
+    - Waits for a specified time after panning.
+    """
     # Drag the map
     end_x = center_x + (dx * movement_pixels)
     end_y = center_y + (dy * movement_pixels)
@@ -228,9 +271,9 @@ def pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport
     # Prepare where to go
     move_mouse_x = end_x - center_x
     move_mouse_y = end_y - center_y
-    print(f"Calculating next image ------------------------------------------------------------------")
+    print(f"Calculating next image ------------------------------------------------------------------------")
     print(
-        f"For next vales with ({dx}, {dy}) direction mouse move x: {move_mouse_x}, y: {move_mouse_y}, end_x: {end_x}, end_y: {end_y}")
+        f"For next vales for {direction_text} ({dx}, {dy}) direction mouse move x: {move_mouse_x}, y: {move_mouse_y}, end_x: {end_x}, end_y: {end_y}")
     # Drag with mouse button held down
     action.click_and_hold().perform()
     action.move_by_offset(move_mouse_x, move_mouse_y).release().perform()
@@ -270,40 +313,37 @@ def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wa
     4. Moves the map view using mouse drag actions.
     5. Waits for the specified time after each move to allow the map to load.
     """
-    # loadtime for a draged page in seconds to wait between map subparts requests
+    # loadtime for a dragged page in seconds to wait between map subparts' requests
     print(f"Walking through the map...")
-    print( "==========================")
-    seen_positions = set()
+    print("==========================")
     action = ActionChains(driver)
-    up = (0, -1)
-    right = (1, 0)
-    down = (0, 1)
-    left = (-1, 0)
-    directions = [up, right, down, left]  # (dx, dy) directions:
+    seen_positions = set()
+    directions = dict(up=(0, -1), right=(1, 0), down=(0, 1), left=(-1, 0))  # (dx, dy) directions:
+    name_of_directions = {v: k for k, v in directions.items()}
     x, y = 0, 0
 
-    # to keep the center in the middle, we move in the opposite direction half the distance
-    for step in range(steps // 2):
-        dx, dy = down
+    # to keep the center in the middle, we move in the opposite directions half the distance of a step
+    for _ in range(steps):
+        dx, dy = directions['down']
         center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
-        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
-        dx, dy = left
+        direction_name = name_of_directions[(dx, dy)]
+        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels // 2, viewport_height, viewport_width, pan_wait_seconds, direction_name)
+        dx, dy = directions['right']
+        direction_name = name_of_directions[(dx, dy)]
         center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
-        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
+        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels // 2, viewport_height, viewport_width, pan_wait_seconds, direction_name)
 
 
-    i = 0
     all_steps = range(1, steps + 1)
     for step in all_steps:
-        for dx, dy in directions:
+        for dx, dy in directions.values():
             for sub_step in range(step):
                 if (x, y) not in seen_positions:
                     # save screenshot of the current position of the map
-                    print(f"In substep {sub_step} of step {step} of {all_steps} steps taking screenshot #{i} for position ({x}, {y}) then croping...")
-                    screenshot_filename = os.path.join(raw_dir, f"screenshot_#{i}_{x}_{y}.png")
+                    print(f"In substep {sub_step} of step {steps + 1} of {all_steps} steps, taking screenshot for position ({x}, {y}) then cropping...")
+                    screenshot_filename = os.path.join(raw_dir, f"screenshot_{x}_{y}.png")
                     take_screenshot(driver, screenshot_filename)
                     cropped_image_size = crop_image(screenshot_filename, cropped_dir, dark)
-                    i += 1
                 else:
                     print(f"Skipping screenshot for position ({x}, {y}) as it has already been taken.")
 
@@ -311,7 +351,8 @@ def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wa
                 center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
 
                 # Pan with mouse and update positions cache
-                pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
+                direction_name = name_of_directions[(dx, dy)]
+                pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds, direction_name)
                 seen_positions.add((x, y))
 
                 # Set next iteration's values
@@ -322,19 +363,37 @@ def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wa
     return cropped_image_size
 
 
-def assemble_big_map(base_dir, cropped_dir, dark, movement_pixels, steps, zoom_level, cropped_image_size, title):
-    """Just a wrapper for the image assembler function. No reason why, it just happened."""
+def assemble_big_map(base_dir, cropped_dir, movement_pixels, steps, zoom_level, cropped_image_size, title):
+    """
+    Assemble a large map from cropped images and save it to a file.
+
+    This function serves as a wrapper for the image assembler function. It prepares
+    the output filename and calls the detailed assembly function.
+
+    Parameters:
+    base_dir (str): The base directory where the assembled map will be saved.
+    cropped_dir (str): The directory containing the cropped image files.
+    movement_pixels (int): The number of pixels moved between each image capture.
+    steps (int): The number of steps taken in each direction during image capture.
+    zoom_level (int): The zoom level of the map used during capture.
+    cropped_image_size (tuple): A tuple (width, height) representing the size of each cropped image.
+    title (str): The title of the map, used in the output filename.
+
+    Side effects:
+    - Prints a status message to the console.
+    - Calls the assemble_image_details function to create and save the assembled map.
+    """
     print("Assembling the big map...")
     underscored_title = title.replace(" ", "_")
-    output_base_filename = os.path.join(base_dir, f"map_{underscored_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    now_text = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_base_filename = os.path.join(base_dir, f"map_{underscored_title}_{now_text}")
     assemble_image_details(
-        cropped_dir, output_base_filename, movement_pixels, dark, cropped_image_size, zoom_level,
-        steps
+        cropped_dir, output_base_filename, movement_pixels, cropped_image_size, zoom_level, steps
     )
 
 
 def assemble_image_details(
-        cropped_dir, output_base_filename, movement_pixels, black, cropped_image_size, zoom_level, steps,
+        cropped_dir, output_base_filename, movement_pixels, cropped_image_size, zoom_level, steps,
     ):
     """
     Assemble cropped images into a single large image using Pillow's paste function.
@@ -346,9 +405,9 @@ def assemble_image_details(
     cropped_dir (str): The directory containing the cropped image files.
     output_base_filename (str): The base filename for the output assembled image.
     movement_pixels (int): The number of pixels moved between each image capture.
-    black (dict): A dictionary containing pixel values for cropping (not used in this function).
     cropped_image_size (tuple): A tuple (width, height) representing the size of each cropped image.
-    number_of_steps (int): The number of steps taken in each direction during image capture.
+    zoom_level (int): The zoom level of the map used during capture.
+    steps (int): The number of steps taken in each direction during image capture.
 
     Returns:
     None
@@ -370,7 +429,7 @@ def assemble_image_details(
             filepath = os.path.join(cropped_dir, filename)
             try:
                 parts = filename.replace(".png", "").split("_")
-                x, y = int(parts[2]), int(parts[3])
+                x, y = int(parts[1]), int(parts[2])
                 position = (x, y)
                 images.append(filepath)
                 positions.append(position)
@@ -477,7 +536,7 @@ def main():
     """
     title = "Pest Megye"  # Title for the assembled map image
     movement_pixels = 800  # Adjust drag distance of mouse
-    steps = 10  # number of "circles" we walk around the map centre
+    steps = 13  # number of "circles" we walk around the map centre
     zoom_level = 13  # Adjust map zoom level upto 19
     pan_wait_seconds = 5  # seconds, Wait for the map to load after each panning
     base_dir, raw_dir, cropped_dir = create_directories()
@@ -490,7 +549,7 @@ def main():
     # workflow starts here
     driver = open_browser(zoom_level=zoom_level)
     cropped_image_size = fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wait_seconds)
-    assemble_big_map(base_dir, cropped_dir, dark, movement_pixels, steps, zoom_level, cropped_image_size, title)
+    assemble_big_map(base_dir, cropped_dir, movement_pixels, steps, zoom_level, cropped_image_size, title)
     cleanup(driver, raw_dir, cropped_dir)
 
     # script running time
