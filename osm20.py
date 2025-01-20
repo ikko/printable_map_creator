@@ -101,6 +101,34 @@ def create_directories():
     return base_dir, raw_dir, cropped_dir
 
 
+def open_browser(zoom_level=17):
+    """
+    Initialize and open a browser with OpenStreetMap at a specified zoom level.
+
+    This function sets up a browser using Selenium WebDriver, navigates to OpenStreetMap
+    with a predefined location (Budapest, Hungary), and sets the map to the specified zoom level.
+
+    Parameters:
+    zoom_level (int, optional): The zoom level for the map. Defaults to 17.
+                                Higher values zoom in closer, lower values zoom out.
+
+    Returns:
+    WebDriver: A Selenium WebDriver instance with the map loaded and ready for interaction.
+
+    Note:
+    The setup_browser() function is defined elsewhere and returns a configured WebDriver instance.
+    """
+    print("Setting up browser...")
+    driver = setup_browser()
+
+    # Open the map
+    map_url = f"https://www.openstreetmap.org/relation/22259#map={zoom_level}/47.496930/19.050561"
+    print("Opening map in browser...")
+    driver.get(map_url)
+    print("Content loaded...")
+    return driver
+
+
 def take_screenshot(driver, filename):
     """
     Take a screenshot of the current browser window and save it to a file.
@@ -157,6 +185,154 @@ def crop_image(filename, cropped_dir, black):
     return width, height
 
 
+def wait(seconds):
+    """
+    Pause execution for a specified number of seconds while displaying a visual progress indicator.
+
+    This function prints a waiting message followed by a series of dots, one for each second of the wait time.
+    It provides a visual indication of the passage of time during the wait period.
+
+    Parameters:
+    seconds (int): The number of seconds to wait.
+
+    Side effects:
+    Prints a waiting message and a series of dots to the console, with one dot printed each second.
+    """
+    print(f"waiting {seconds} seconds.", end="", flush=True)
+    for _ in range(seconds):
+        print(".", end="", flush=True)
+        time.sleep(1)
+    print()
+
+
+def move_mouse_to_center_of_viewport(action, driver):
+    viewport_height, viewport_width = retrieve_viewport_size(driver)
+    # Move mouse to the center of the viewport before dragging
+    center_x = viewport_width // 2
+    center_y = viewport_height // 2
+    move_mouse_to(action, center_x, center_y)
+    return center_x, center_y, viewport_height, viewport_width
+
+
+def move_mouse_to(action, center_x, center_y):
+    action.w3c_actions.pointer_action.move_to_location(center_x, center_y)
+
+
+def pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds):
+    # Drag the map
+    end_x = center_x + (dx * movement_pixels)
+    end_y = center_y + (dy * movement_pixels)
+    # Clamp end positions within the viewport
+    end_x = max(0, min(viewport_width, end_x))
+    end_y = max(0, min(viewport_height, end_y))
+    # Prepare where to go
+    move_mouse_x = end_x - center_x
+    move_mouse_y = end_y - center_y
+    print(f"Calculating next image ------------------------------------------------------------------")
+    print(
+        f"For next vales with ({dx}, {dy}) direction mouse move x: {move_mouse_x}, y: {move_mouse_y}, end_x: {end_x}, end_y: {end_y}")
+    # Drag with mouse button held down
+    action.click_and_hold().perform()
+    action.move_by_offset(move_mouse_x, move_mouse_y).release().perform()
+    print(f"Patience while browser loads images, ", end="", flush=True)
+    wait(pan_wait_seconds)  # seconds, Wait for the map to load
+
+
+def retrieve_viewport_size(driver):
+    viewport_width = driver.execute_script("return window.innerWidth;")
+    viewport_height = driver.execute_script("return window.innerHeight;")
+    return viewport_height, viewport_width
+
+
+def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wait_seconds):
+    """
+    Capture screenshots of a map by navigating through it in a spiral pattern using mouse dragging.
+
+    This function moves through the map, takes screenshots at each position, crops them,
+    and saves both raw and cropped versions. It uses Selenium WebDriver to control the browser.
+
+    Parameters:
+    cropped_dir (str): Directory path to save cropped screenshots.
+    dark (dict): Dictionary containing pixel values for cropping dark UI elements.
+    driver (WebDriver): Selenium WebDriver instance controlling the browser.
+    movement_pixels (int): Number of pixels to move in each direction during navigation.
+    raw_dir (str): Directory path to save raw screenshots.
+    steps (int): Number of "circles" to walk around the map center.
+    scroll_wait_seconds (int, optional): Time to wait for the map to load after each scroll. Defaults to 6.
+
+    Returns:
+    tuple: Dimensions (width, height) of the last cropped image.
+
+    The function performs the following steps:
+    1. Initializes variables for navigation and viewport dimensions.
+    2. Iterates through the specified number of steps in a spiral pattern.
+    3. At each position, takes a screenshot, saves it, and crops it.
+    4. Moves the map view using mouse drag actions.
+    5. Waits for the specified time after each move to allow the map to load.
+    """
+    # loadtime for a draged page in seconds to wait between map subparts requests
+    print(f"Walking through the map...")
+    print( "==========================")
+    seen_positions = set()
+    action = ActionChains(driver)
+    up = (0, -1)
+    right = (1, 0)
+    down = (0, 1)
+    left = (-1, 0)
+    directions = [up, right, down, left]  # (dx, dy) directions:
+    x, y = 0, 0
+
+    # to keep the center in the middle, we move in the opposite direction half the distance
+    for step in range(steps // 2):
+        dx, dy = down
+        center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
+        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
+        dx, dy = left
+        center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
+        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
+
+
+    i = 0
+    all_steps = range(1, steps + 1)
+    for step in all_steps:
+        for dx, dy in directions:
+            for sub_step in range(step):
+                if (x, y) not in seen_positions:
+                    # save screenshot of the current position of the map
+                    print(f"In substep {sub_step} of step {step} of {all_steps} steps taking screenshot #{i} for position ({x}, {y}) then croping...")
+                    screenshot_filename = os.path.join(raw_dir, f"screenshot_#{i}_{x}_{y}.png")
+                    take_screenshot(driver, screenshot_filename)
+                    cropped_image_size = crop_image(screenshot_filename, cropped_dir, dark)
+                    i += 1
+                else:
+                    print(f"Skipping screenshot for position ({x}, {y}) as it has already been taken.")
+
+                # Move mouse to the center of the viewport before dragging
+                center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
+
+                # Pan with mouse and update positions cache
+                pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
+                seen_positions.add((x, y))
+
+                # Set next iteration's values
+                x += dx
+                y += dy
+
+
+    return cropped_image_size
+
+
+def assemble_big_map(base_dir, cropped_dir, dark, movement_pixels, steps, zoom_level, cropped_image_size, title):
+    """Just a wrapper for the image assembler function. No reason why, it just happened."""
+    print("Assembling the big map...")
+    underscored_title = title.replace(" ", "_")
+    output_base_filename = os.path.join(base_dir, f"map_{underscored_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    assemble_image_details(
+        cropped_dir, output_base_filename, movement_pixels, dark, cropped_image_size, zoom_level,
+        steps
+    )
+
+
 def assemble_image_details(
         cropped_dir, output_base_filename, movement_pixels, black, cropped_image_size, zoom_level, steps,
     ):
@@ -208,8 +384,8 @@ def assemble_image_details(
 
     # size of the big picture, needs still refinement
     width, height = cropped_image_size
-    assembled_image_size_x = width + (movement_pixels * steps * 2)
-    assembled_image_size_y = height + (movement_pixels * steps * 2)
+    assembled_image_size_x = width + (movement_pixels * steps * 2) + 6000
+    assembled_image_size_y = height + (movement_pixels * steps * 2) + 6000
 
     # this will hold all the images
     print(f"creating empty assembled image: {assembled_image_size_x}x{assembled_image_size_y} pixel png.")
@@ -232,8 +408,8 @@ def assemble_image_details(
         x, y = int(pos[0]), int(pos[1])
 
         #          center     coordinates             cropped's center     against 'spiral' path displacement
-        x_offset = center_x - (x * movement_pixels) - (height // 2)        # + ((steps // 4) * movement_pixels)
-        y_offset = center_y - (y * movement_pixels) - (width // 2)         # - ((steps // 4) * movement_pixels)
+        x_offset = center_x - (x * movement_pixels) - (width // 2)        # + ((steps // 4) * movement_pixels)
+        y_offset = center_y - (y * movement_pixels) - (height // 2)         # - ((steps // 4) * movement_pixels)
         assembled_image.paste(image, (x_offset, y_offset))
         print(f"Image position: ({x},{y}) size {width}x{height}px pasted into assembled map.")
 
@@ -283,180 +459,6 @@ def cleanup(driver, raw_dir, cropped_dir):
     print("Process completed.")
 
 
-def assemble_big_map(base_dir, cropped_dir, dark, movement_pixels, steps, zoom_level, cropped_image_size, title):
-    """Just a wrapper for the image assembler function. No reason why, it just happened."""
-    print("Assembling the big map...")
-    underscored_title = title.replace(" ", "_")
-    output_base_filename = os.path.join(base_dir, f"map_{underscored_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-    assemble_image_details(
-        cropped_dir, output_base_filename, movement_pixels, dark, cropped_image_size, zoom_level,
-        steps
-    )
-
-
-def open_browser(zoom_level=17):
-    """
-    Initialize and open a browser with OpenStreetMap at a specified zoom level.
-
-    This function sets up a browser using Selenium WebDriver, navigates to OpenStreetMap
-    with a predefined location (Budapest, Hungary), and sets the map to the specified zoom level.
-
-    Parameters:
-    zoom_level (int, optional): The zoom level for the map. Defaults to 17.
-                                Higher values zoom in closer, lower values zoom out.
-
-    Returns:
-    WebDriver: A Selenium WebDriver instance with the map loaded and ready for interaction.
-
-    Note:
-    The setup_browser() function is defined elsewhere and returns a configured WebDriver instance.
-    """
-    print("Setting up browser...")
-    driver = setup_browser()
-
-    # Open the map
-    map_url = f"https://www.openstreetmap.org/relation/22259#map={zoom_level}/47.496930/19.050561"
-    print("Opening map in browser...")
-    driver.get(map_url)
-    print("Content loaded...")
-    return driver
-
-def wait(seconds):
-    """
-    Pause execution for a specified number of seconds while displaying a visual progress indicator.
-
-    This function prints a waiting message followed by a series of dots, one for each second of the wait time.
-    It provides a visual indication of the passage of time during the wait period.
-
-    Parameters:
-    seconds (int): The number of seconds to wait.
-
-    Side effects:
-    Prints a waiting message and a series of dots to the console, with one dot printed each second.
-    """
-    print(f"waiting {seconds} seconds.", end="", flush=True)
-    for _ in range(seconds):
-        print(".", end="", flush=True)
-        time.sleep(1)
-    print()
-
-
-def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wait_seconds):
-    """
-    Capture screenshots of a map by navigating through it in a spiral pattern using mouse dragging.
-
-    This function moves through the map, takes screenshots at each position, crops them,
-    and saves both raw and cropped versions. It uses Selenium WebDriver to control the browser.
-
-    Parameters:
-    cropped_dir (str): Directory path to save cropped screenshots.
-    dark (dict): Dictionary containing pixel values for cropping dark UI elements.
-    driver (WebDriver): Selenium WebDriver instance controlling the browser.
-    movement_pixels (int): Number of pixels to move in each direction during navigation.
-    raw_dir (str): Directory path to save raw screenshots.
-    steps (int): Number of "circles" to walk around the map center.
-    scroll_wait_seconds (int, optional): Time to wait for the map to load after each scroll. Defaults to 6.
-
-    Returns:
-    tuple: Dimensions (width, height) of the last cropped image.
-
-    The function performs the following steps:
-    1. Initializes variables for navigation and viewport dimensions.
-    2. Iterates through the specified number of steps in a spiral pattern.
-    3. At each position, takes a screenshot, saves it, and crops it.
-    4. Moves the map view using mouse drag actions.
-    5. Waits for the specified time after each move to allow the map to load.
-    """
-    # loadtime for a draged page in seconds to wait between map subparts requests
-    print(f"Walking through the map...")
-    print( "==========================")
-    seen_positions = set()
-    action = ActionChains(driver)
-    up = (0, -1)
-    right = (1, 0)
-    down = (0, 1)
-    left = (-1, 0)
-    directions = [up, right, down, left]  # (dx, dy) directions:
-    x, y = 0, 0
-
-    # to keep the center in the middle, we move in the opposite direction half the distance
-    for step in range(steps // 2):
-        dx, dy = down
-        center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
-        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
-        dx, dy = left
-        center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
-        pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
-
-    i = 0
-    all_steps = range(1, steps + 1)
-    for step in all_steps:
-        for dx, dy in directions:
-            for sub_step in range(step):
-                if (x, y) not in seen_positions:
-                    # save screenshot of the current position of the map
-                    print(f"In substep {sub_step} of step {step} of {all_steps} steps taking screenshot #{i} for position ({x}, {y}) then croping...")
-                    screenshot_filename = os.path.join(raw_dir, f"screenshot_#{i}_{x}_{y}.png")
-                    take_screenshot(driver, screenshot_filename)
-                    cropped_image_size = crop_image(screenshot_filename, cropped_dir, dark)
-                    i += 1
-                else:
-                    print(f"Skipping screenshot for position ({x}, {y}) as it has already been taken.")
-
-                # Move mouse to the center of the viewport before dragging
-                center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
-
-                # Pan with mouse and update positions cache
-                pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds)
-                seen_positions.add((x, y))
-
-                # Set next iteration's values
-                x += dx
-                y += dy
-
-
-    return cropped_image_size
-
-
-def move_mouse_to_center_of_viewport(action, driver):
-    viewport_height, viewport_width = retrieve_viewport_size(driver)
-    # Move mouse to the center of the viewport before dragging
-    center_x = viewport_width // 2
-    center_y = viewport_height // 2
-    move_mouse_to(action, center_x, center_y)
-    return center_x, center_y, viewport_height, viewport_width
-
-
-def retrieve_viewport_size(driver):
-    viewport_width = driver.execute_script("return window.innerWidth;")
-    viewport_height = driver.execute_script("return window.innerHeight;")
-    return viewport_height, viewport_width
-
-
-def pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds):
-    # Drag the map
-    end_x = center_x + (dx * movement_pixels)
-    end_y = center_y + (dy * movement_pixels)
-    # Clamp end positions within the viewport
-    end_x = max(0, min(viewport_width, end_x))
-    end_y = max(0, min(viewport_height, end_y))
-    # Prepare where to go
-    move_mouse_x = end_x - center_x
-    move_mouse_y = end_y - center_y
-    print(f"Calculating next image --------------------------------------------------------------")
-    print(
-        f"For next vales with ({dx}, {dy}) direction mouse move x: {move_mouse_x}, y: {move_mouse_y}, end_x: {end_x}, end_y: {end_y}")
-    # Drag with mouse button held down
-    action.click_and_hold().perform()
-    action.move_by_offset(move_mouse_x, move_mouse_y).release().perform()
-    print(f"Patience while browser loads images, ", end="", flush=True)
-    wait(pan_wait_seconds)  # seconds, Wait for the map to load
-
-
-def move_mouse_to(action, center_x, center_y):
-    action.w3c_actions.pointer_action.move_to_location(center_x, center_y)
-
-
 def main():
     """
     Main function to execute the entire process of capturing, processing, and assembling map screenshots.
@@ -475,9 +477,9 @@ def main():
     """
     title = "Pest Megye"  # Title for the assembled map image
     movement_pixels = 800  # Adjust drag distance of mouse
-    steps = 5  # number of "circles" we walk around the map centre
-    zoom_level = 14  # Adjust map zoom level upto 19
-    pan_wait_seconds = 3  # seconds, Wait for the map to load after each scroll
+    steps = 10  # number of "circles" we walk around the map centre
+    zoom_level = 13  # Adjust map zoom level upto 19
+    pan_wait_seconds = 5  # seconds, Wait for the map to load after each panning
     base_dir, raw_dir, cropped_dir = create_directories()
     dark_top, dark_bottom = 110, 110
     dark_left, dark_right = 400, 100
