@@ -1,3 +1,12 @@
+map is from (openstreetmaps)[https://www.openstreetmap.org/]
+
+```
+split:   split -b 25M largefile.bin splitted_largefile.bin_
+combine: cat splitted_largefile.bin_* > largefile_combined.bin
+
+```
+
+
 Copyright 2025 Béky Miklós
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:

@@ -77,7 +77,7 @@ def selenium_firefox():
     return driver
 
 
-def create_directories():
+def create_directories(zoom_level, steps):
     """
     Create necessary directories for storing screenshots and outputs.
 
@@ -93,7 +93,7 @@ def create_directories():
         - cropped_dir (str): Path to the directory for storing cropped images.
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    base_dir = f"map_output_{timestamp}"
+    base_dir = f"map_steps{steps}_zoom{zoom_level}_{timestamp}"
     os.makedirs(base_dir, exist_ok=True)
     raw_dir = os.path.join(base_dir, "raw_screenshots")
     cropped_dir = os.path.join(base_dir, "cropped_images")
@@ -322,13 +322,13 @@ def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wa
     name_of_directions = {v: k for k, v in directions.items()}
     x, y = 0, 0
 
-    # to keep the center in the middle, we move in the opposite directions half the distance of a step
+    # to keep the center in the middle, we move in the opposite directions half the distance for almost every step a step
     for _ in range(steps):
         dx, dy = directions['down']
         center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
         direction_name = name_of_directions[(dx, dy)]
         pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels // 2, viewport_height, viewport_width, pan_wait_seconds, direction_name)
-        dx, dy = directions['right']
+        dx, dy = directions['left']
         direction_name = name_of_directions[(dx, dy)]
         center_x, center_y, viewport_height, viewport_width = move_mouse_to_center_of_viewport(action, driver)
         pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels // 2, viewport_height, viewport_width, pan_wait_seconds, direction_name)
@@ -538,8 +538,8 @@ def main():
     movement_pixels = 800  # Adjust drag distance of mouse
     steps = 13  # number of "circles" we walk around the map centre
     zoom_level = 13  # Adjust map zoom level upto 19
-    pan_wait_seconds = 5  # seconds, Wait for the map to load after each panning
-    base_dir, raw_dir, cropped_dir = create_directories()
+    pan_wait_seconds = 6  # seconds, Wait for the map to load after each panning
+    base_dir, raw_dir, cropped_dir = create_directories(zoom_level, steps)
     dark_top, dark_bottom = 110, 110
     dark_left, dark_right = 400, 100
     dark = {'top': dark_top, 'bottom': dark_bottom, 'left': dark_left, 'right': dark_right}
