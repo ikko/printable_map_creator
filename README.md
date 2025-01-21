@@ -1,9 +1,8 @@
-map is from (openstreetmaps)[https://www.openstreetmap.org/]
+map is from [openstreetmaps](https://www.openstreetmap.org/)
 
 ```
 split:   split -b 25M largefile.bin splitted_largefile.bin_
 combine: cat splitted_largefile.bin_* > largefile_combined.bin
-
 ```
 
 
