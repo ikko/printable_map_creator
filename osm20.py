@@ -355,7 +355,7 @@ def fetch_map(cropped_dir, dark, driver, movement_pixels, raw_dir, steps, pan_wa
                 pan_with_mouse(action, center_x, center_y, dx, dy, movement_pixels, viewport_height, viewport_width, pan_wait_seconds, direction_name)
                 seen_positions.add((x, y))
 
-                # Set next iteration's values
+                # Set next iteration's coordinates
                 x += dx
                 y += dy
 
